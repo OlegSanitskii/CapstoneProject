@@ -28,7 +28,7 @@ fun ManualMealScreen(onSaved: () -> Unit) {
 
     // form state
     var name by rememberSaveable { mutableStateOf("") }
-    var portion by rememberSaveable { mutableStateOf("") }        // grams
+    var portion by rememberSaveable { mutableStateOf("") }
     var calories by rememberSaveable { mutableStateOf("") }
     var protein by rememberSaveable { mutableStateOf("") }
     var carbs by rememberSaveable { mutableStateOf("") }
@@ -55,7 +55,7 @@ fun ManualMealScreen(onSaved: () -> Unit) {
             Modifier
                 .fillMaxSize()
                 .padding(16.dp)
-                .verticalScroll(scrollState),      // <-- прокрутка
+                .verticalScroll(scrollState),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             // --- Form ---
@@ -171,18 +171,16 @@ fun ManualMealScreen(onSaved: () -> Unit) {
                     )
                 }
             } else {
-                // Используем LazyColumn внутри фиксированного размера, чтобы сохранить общую прокрутку экрана
                 LazyColumn(
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(min = 0.dp, max = 360.dp)   // чтобы список был прокручиваемым, не растягивая экран
+                        .heightIn(min = 0.dp, max = 360.dp)
                 ) {
                     items(recent.take(10), key = { it.id }) { meal ->
                         RecentMealItem(
                             meal = meal,
                             onEdit = {
-                                // заполняем форму данными
                                 editingId = meal.id
                                 name = meal.name
                                 portion = meal.portionGrams?.toString().orEmpty()
@@ -191,7 +189,6 @@ fun ManualMealScreen(onSaved: () -> Unit) {
                                 carbs = meal.carbs.toString()
                                 fat = meal.fat.toString()
                                 mealType = meal.mealType
-                                // прокрутиться наверх к форме (опционально можно добавить)
                             },
                             onDelete = { vm.deleteMeal(meal) }
                         )
@@ -218,22 +215,49 @@ private fun RecentMealItem(
         ) {
             Column(Modifier.weight(1f)) {
                 Text(meal.name, style = MaterialTheme.typography.titleMedium)
+
                 Text(
                     "${meal.calories} kcal • P ${meal.protein.round1()} • C ${meal.carbs.round1()} • F ${meal.fat.round1()}",
                     style = MaterialTheme.typography.bodySmall
                 )
+
                 meal.portionGrams?.let {
-                    Text("Portion: ${it.round1()} g", style = MaterialTheme.typography.bodySmall)
+                    Text(
+                        "Portion: ${it.round1()} g",
+                        style = MaterialTheme.typography.bodySmall
+                    )
                 }
-                Text(meal.mealType, style = MaterialTheme.typography.labelSmall)
+
+                Text(
+                    text = formatMealDate(meal.createdAt),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Text(
+                    meal.mealType,
+                    style = MaterialTheme.typography.labelSmall
+                )
             }
+
             Row {
-                IconButton(onClick = onEdit) { Icon(Icons.Default.Edit, contentDescription = "Edit") }
-                IconButton(onClick = onDelete) { Icon(Icons.Default.Delete, contentDescription = "Delete") }
+                IconButton(onClick = onEdit) {
+                    Icon(Icons.Default.Edit, contentDescription = "Edit")
+                }
+                IconButton(onClick = onDelete) {
+                    Icon(Icons.Default.Delete, contentDescription = "Delete")
+                }
             }
         }
     }
 }
 
+
 @SuppressLint("DefaultLocale")
 private fun Float.round1(): String = String.format("%.1f", this)
+
+@SuppressLint("SimpleDateFormat")
+private fun formatMealDate(epochMillis: Long): String {
+    val df = java.text.SimpleDateFormat("MMM d, HH:mm", java.util.Locale.getDefault())
+    return df.format(java.util.Date(epochMillis))
+}

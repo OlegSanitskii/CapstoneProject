@@ -11,7 +11,7 @@ android {
 
     defaultConfig {
         applicationId = "ca.gbc.comp3074.snapcal"
-        minSdk = 24
+        minSdk = 26
         targetSdk = 36
         versionCode = 1
         versionName = "1.0"
@@ -47,6 +47,17 @@ dependencies {
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
+
+    // --- ML Kit: OCR (on-device text recognition) ---
+    implementation("com.google.android.gms:play-services-mlkit-text-recognition:18.0.2") // OCR :contentReference[oaicite:1]{index=1}
+
+    // --- Health Connect client ---
+    implementation("androidx.health.connect:connect-client:1.1.0")  // Health Connect SDK :contentReference[oaicite:2]{index=2}
+
+    // Preview images from URI in Compose
+    implementation("io.coil-kt:coil-compose:2.7.0")
+
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.navigation:navigation-compose:2.8.3")

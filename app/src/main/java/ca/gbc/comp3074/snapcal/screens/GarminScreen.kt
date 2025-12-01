@@ -1,139 +1,217 @@
 package ca.gbc.comp3074.snapcal.screens
 
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.health.connect.client.HealthConnectClient
+import androidx.health.connect.client.PermissionController
+import androidx.health.connect.client.permission.HealthPermission
 import androidx.navigation.NavHostController
-import ca.gbc.comp3074.snapcal.navigation.Screen
+import ca.gbc.comp3074.snapcal.health.HealthConnectManager
 import ca.gbc.comp3074.snapcal.ui.components.AppTopBar
 import ca.gbc.comp3074.snapcal.ui.components.CardBlock
-import ca.gbc.comp3074.snapcal.ui.state.AuthViewModel
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.graphics.Color
+import kotlinx.coroutines.launch
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun GarminScreen(nav: NavHostController? = null) {
-    val authVM: AuthViewModel = viewModel()
-    val email = authVM.userEmail.collectAsState().value
+fun GarminScreen(
+    nav: NavHostController? = null
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    var hcAvailable by remember { mutableStateOf<Boolean?>(null) }
+    var hcHasPermissions by remember { mutableStateOf(false) }
+    var todaySteps by remember { mutableStateOf<Long?>(null) }
+    var todayCalories by remember { mutableStateOf<Int?>(null) }
+    var weeklyCalories by remember { mutableStateOf<List<Int>?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    val client: HealthConnectClient? = remember {
+        HealthConnectManager.getClientOrNull(context)
+    }
+
+    suspend fun refreshData(hcClient: HealthConnectClient) {
+        error = null
+        try {
+            hcHasPermissions = HealthConnectManager.hasAllPermissions(hcClient)
+            if (hcHasPermissions) {
+                todaySteps = HealthConnectManager.readTodaySteps(hcClient)
+                todayCalories = HealthConnectManager.readTodayCalories(hcClient)
+                weeklyCalories = HealthConnectManager.readWeeklyCalories(hcClient)
+            }
+        } catch (e: Exception) {
+            error = e.localizedMessage ?: "Failed to read Health Connect data"
+        }
+    }
+
+    // Лаунчер именно с Set<String>
+    val permissionsLauncher = rememberLauncherForActivityResult(
+        contract = PermissionController.createRequestPermissionResultContract()
+    ) { granted: Set<String> ->
+        hcHasPermissions = granted.containsAll(HealthConnectManager.PERMISSIONS)
+        if (hcHasPermissions && client != null) {
+            scope.launch { refreshData(client) }
+        }
+    }
+
+    LaunchedEffect(client) {
+        hcAvailable = client != null
+        if (client != null) {
+            refreshData(client)
+        }
+    }
 
     LazyColumn(
-        Modifier
+        modifier = Modifier
             .fillMaxSize()
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        item { AppTopBar("Garmin Integration") }
+        item { AppTopBar("Health & Activity", nav) }
 
-        // Подключение к Garmin (плейсхолдер переключателя)
+        // --- Status ---
         item {
-            CardBlock {
-                Row(
-                    Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Column {
-                        Text("Connect to Garmin", fontWeight = FontWeight.Bold)
-                        Text("Sync workouts, steps, heart rate", color = Color.Gray)
-                    }
-                    var enabled by remember { mutableStateOf(true) }
-                    Switch(checked = enabled, onCheckedChange = { enabled = it })
-                }
-            }
-        }
-
-        // Блок аккаунта + выход из сессии
-        item {
-            CardBlock(title = "Account") {
-                if (email.isNotBlank()) {
-                    Text("Signed in as: $email", color = Color.Gray)
-                    Spacer(Modifier.height(8.dp))
-                } else {
-                    Text("Guest session", color = Color.Gray)
-                    Spacer(Modifier.height(8.dp))
-                }
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End
-                ) {
-                    TextButton(onClick = {
-                        authVM.signOut {
-                            // если есть NavController — возвращаемся на Login и чистим back stack
-                            nav?.navigate(Screen.Login.route) {
-                                popUpTo(Screen.Dashboard.route) { inclusive = true }
-                                launchSingleTop = true
+            CardBlock(title = "Health Connect status") {
+                when (hcAvailable) {
+                    null -> Text("Checking Health Connect...", color = Color.Gray)
+                    false -> Text(
+                        "Health Connect is not available on this device.",
+                        color = MaterialTheme.colorScheme.error
+                    )
+                    true -> {
+                        Text("Health Connect is available ✅")
+                        Spacer(Modifier.height(4.dp))
+                        if (hcHasPermissions) {
+                            Text("Permissions granted ✅")
+                        } else {
+                            Text(
+                                "Permissions not granted.",
+                                color = MaterialTheme.colorScheme.error
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            Button(
+                                onClick = {
+                                    try {
+                                        permissionsLauncher.launch(HealthConnectManager.PERMISSIONS)
+                                    } catch (e: Exception) {
+                                        error = "Failed to launch permissions: ${e.localizedMessage}"
+                                    }
+                                }
+                            ) {
+                                Text("Grant permissions")
                             }
                         }
-                    }) {
-                        Text("Sign out")
                     }
+                }
+
+                if (error != null) {
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = error!!,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
             }
         }
 
-        // Недавние тренировки (заглушка)
+        // --- Today summary ---
         item {
-            CardBlock(title = "Recent Workouts") {
-                val items = listOf(
-                    "Sep 26 • Cycling" to "45 min • 520 kcal",
-                    "Sep 25 • Running" to "30 min • 340 kcal",
-                    "Sep 23 • Strength" to "40 min • 280 kcal"
-                )
-                items.forEach { (title, meta) ->
-                    Row(
-                        Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
+            CardBlock(title = "Today summary") {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        "Steps today: ${todaySteps ?: 0}",
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                    Text(
+                        "Calories burned: ${todayCalories ?: 0} kcal",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Text(
+                        "This data is read live from Health Connect.",
+                        color = Color.Gray,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
+        }
+
+        // --- Weekly calories chart ---
+        item {
+            CardBlock(title = "Weekly calories burned") {
+                if (hcHasPermissions && weeklyCalories != null) {
+                    val labels = HealthConnectManager.weekDayLabels()
+                    val values = weeklyCalories!!
+                    val maxVal = (values.maxOrNull() ?: 0).coerceAtLeast(1)
+
+                    Column {
                         Text(
-                            title,
-                            fontWeight = FontWeight.SemiBold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                            "Last 7 days",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold
                         )
-                        Text(meta, color = Color.Gray)
-                    }
-                    Spacer(Modifier.height(8.dp))
-                }
-            }
-        }
+                        Spacer(Modifier.height(8.dp))
 
-        // Пульс (заглушка)
-        item {
-            CardBlock(title = "Heart Rate Summary") {
-                Text("Resting HR: 58 bpm")
-                Text("Average HR (workouts): 138 bpm")
-                Text("Max HR (last workout): 172 bpm")
-            }
-        }
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(140.dp),
+                            verticalAlignment = Alignment.Bottom,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            values.forEachIndexed { index, v ->
+                                val fraction =
+                                    (v.toFloat() / maxVal.toFloat()).coerceIn(0f, 1f)
 
-        // Калории за неделю (заглушка)
-        item {
-            CardBlock(title = "Calories Burned (Weekly)") {
-                val days = listOf("M","T","W","T","F","S","S")
-                val vals = listOf(520,340,280,600,450,700,300)
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    days.indices.forEach { i ->
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Box(
-                                Modifier
-                                    .width(16.dp)
-                                    .height((vals[i] / 10).dp)
-                                    .background(Color(0xFF3B82F6))
-                            )
-                            Spacer(Modifier.height(6.dp))
-                            Text(days[i], color = Color.Gray, style = MaterialTheme.typography.labelSmall)
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.Bottom
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .width(14.dp)
+                                            .fillMaxHeight(fraction)
+                                            .background(
+                                                color = MaterialTheme.colorScheme.primary,
+                                                shape = MaterialTheme.shapes.small
+                                            )
+                                    )
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(
+                                        labels[index],
+                                        color = Color.Gray,
+                                        style = MaterialTheme.typography.labelSmall
+                                    )
+                                }
+                            }
                         }
+
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            "Bars show total calories burned per day.",
+                            color = Color.Gray,
+                            style = MaterialTheme.typography.bodySmall
+                        )
                     }
+                } else {
+                    Text(
+                        "Grant Health Connect permissions to see weekly calories.",
+                        color = Color.Gray,
+                        style = MaterialTheme.typography.bodySmall
+                    )
                 }
             }
         }

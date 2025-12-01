@@ -68,12 +68,12 @@ fun ProgressScreen() {
             }
         }
 
-        // --- Возвращённый "рисованный" недельный график (In теперь реальные) ---
+
         item {
             CardBlock(title = "Calories In (weekly) — $weekTotal kcal") {
                 WeeklyInOutChart(
                     inData = intake7.map { it.kcal },
-                    outData = null // заглушка; когда подключим Health Connect — передадим список расхода
+                    outData = null
                 )
             }
         }
