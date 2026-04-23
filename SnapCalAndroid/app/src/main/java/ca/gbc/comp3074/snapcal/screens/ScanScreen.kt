@@ -53,11 +53,22 @@ fun ScanScreen(
     var nutrition by remember { mutableStateOf(NutritionParser.NutritionData()) }
     var productName by rememberSaveable { mutableStateOf("") }
 
+    var showAdjustDialog by remember { mutableStateOf(false) }
+    var editCalories by rememberSaveable { mutableStateOf("") }
+    var editProtein by rememberSaveable { mutableStateOf("") }
+    var editCarbs by rememberSaveable { mutableStateOf("") }
+    var editFat by rememberSaveable { mutableStateOf("") }
+
     val scrollState = rememberScrollState()
 
     LaunchedEffect(ocrText) {
         if (ocrText.isNotBlank()) {
             nutrition = NutritionParser.parse(ocrText)
+
+            editCalories = nutrition.calories?.toString().orEmpty()
+            editProtein = nutrition.protein?.toString().orEmpty()
+            editCarbs = nutrition.carbs?.toString().orEmpty()
+            editFat = nutrition.fat?.toString().orEmpty()
 
             if (productName.isBlank()) {
                 productName = ocrText
@@ -70,6 +81,10 @@ fun ScanScreen(
         } else {
             nutrition = NutritionParser.NutritionData()
             productName = ""
+            editCalories = ""
+            editProtein = ""
+            editCarbs = ""
+            editFat = ""
         }
     }
 
@@ -99,6 +114,81 @@ fun ScanScreen(
     Scaffold(
         topBar = { AppTopBar("Scan Receipt", nav) }
     ) { padding ->
+
+        if (showAdjustDialog) {
+            AlertDialog(
+                onDismissRequest = { showAdjustDialog = false },
+                title = { Text("Adjust nutrition") },
+                text = {
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = productName,
+                            onValueChange = { productName = it },
+                            label = { Text("Product name") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true
+                        )
+
+                        OutlinedTextField(
+                            value = editCalories,
+                            onValueChange = { editCalories = it.filter(Char::isDigit) },
+                            label = { Text("Calories (kcal)") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true
+                        )
+
+                        OutlinedTextField(
+                            value = editProtein,
+                            onValueChange = { editProtein = it.filter(Char::isDigit) },
+                            label = { Text("Protein (g)") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true
+                        )
+
+                        OutlinedTextField(
+                            value = editCarbs,
+                            onValueChange = { editCarbs = it.filter(Char::isDigit) },
+                            label = { Text("Carbs (g)") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true
+                        )
+
+                        OutlinedTextField(
+                            value = editFat,
+                            onValueChange = { editFat = it.filter(Char::isDigit) },
+                            label = { Text("Fat (g)") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true
+                        )
+                    }
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            nutrition = NutritionParser.NutritionData(
+                                calories = editCalories.toIntOrNull(),
+                                protein = editProtein.toIntOrNull(),
+                                carbs = editCarbs.toIntOrNull(),
+                                fat = editFat.toIntOrNull()
+                            )
+                            showAdjustDialog = false
+                        }
+                    ) {
+                        Text("Apply")
+                    }
+                },
+                dismissButton = {
+                    TextButton(
+                        onClick = { showAdjustDialog = false }
+                    ) {
+                        Text("Cancel")
+                    }
+                }
+            )
+        }
+
         Column(
             modifier = Modifier
                 .padding(padding)
@@ -229,8 +319,8 @@ fun ScanScreen(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         OutlinedButton(
-                            onClick = {
-                            }
+                            onClick = { showAdjustDialog = true },
+                            enabled = ocrText.isNotBlank()
                         ) {
                             Icon(Icons.Default.Edit, contentDescription = null)
                             Spacer(Modifier.width(6.dp))
@@ -249,7 +339,7 @@ fun ScanScreen(
                                     protein = (nutrition.protein ?: 0).toFloat(),
                                     carbs = (nutrition.carbs ?: 0).toFloat(),
                                     fat = (nutrition.fat ?: 0).toFloat(),
-                                    mealType = "Meal", // потом можно дать выбор типа
+                                    mealType = "Meal",
                                     createdAt = System.currentTimeMillis(),
                                     portionGrams = null,
                                     photoPath = selectedImage?.toString(),
@@ -262,6 +352,11 @@ fun ScanScreen(
                                 ocrText = ""
                                 productName = ""
                                 nutrition = NutritionParser.NutritionData()
+                                editCalories = ""
+                                editProtein = ""
+                                editCarbs = ""
+                                editFat = ""
+                                showAdjustDialog = false
 
                                 onSaved()
                             },
