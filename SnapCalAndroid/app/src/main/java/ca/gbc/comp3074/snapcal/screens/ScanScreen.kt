@@ -35,6 +35,7 @@ import ca.gbc.comp3074.snapcal.ui.components.Nutriple
 import ca.gbc.comp3074.snapcal.ui.state.MealsViewModel
 import coil.compose.rememberAsyncImagePainter
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -50,8 +51,20 @@ fun ScanScreen(
     var ocrText by remember { mutableStateOf("") }
     var isLoading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+
+    // What user sees and what gets saved after recalculation
     var nutrition by remember { mutableStateOf(NutritionParser.NutritionData()) }
+
+    // Base parsed nutrition for the original label serving
+    var baseNutrition by remember { mutableStateOf(NutritionParser.NutritionData()) }
+
     var productName by rememberSaveable { mutableStateOf("") }
+
+    // Serving size detected from label (base reference)
+    var detectedServingSizeGrams by remember { mutableStateOf<Float?>(null) }
+
+    // Editable serving/portion field shown on screen
+    var portionSizeGramsText by rememberSaveable { mutableStateOf("") }
 
     var showAdjustDialog by remember { mutableStateOf(false) }
     var editCalories by rememberSaveable { mutableStateOf("") }
@@ -63,12 +76,23 @@ fun ScanScreen(
 
     LaunchedEffect(ocrText) {
         if (ocrText.isNotBlank()) {
-            nutrition = NutritionParser.parse(ocrText)
+            val parsedNutrition = NutritionParser.parse(ocrText)
+            val parsedServingSize = extractServingSizeGrams(ocrText)
 
-            editCalories = nutrition.calories?.toString().orEmpty()
-            editProtein = nutrition.protein?.toString().orEmpty()
-            editCarbs = nutrition.carbs?.toString().orEmpty()
-            editFat = nutrition.fat?.toString().orEmpty()
+            baseNutrition = parsedNutrition
+            detectedServingSizeGrams = parsedServingSize
+            portionSizeGramsText = parsedServingSize?.toPrettyString().orEmpty()
+
+            editCalories = parsedNutrition.calories?.toString().orEmpty()
+            editProtein = parsedNutrition.protein?.toString().orEmpty()
+            editCarbs = parsedNutrition.carbs?.toString().orEmpty()
+            editFat = parsedNutrition.fat?.toString().orEmpty()
+
+            nutrition = recalculateNutrition(
+                baseNutrition = parsedNutrition,
+                detectedServingSizeGrams = parsedServingSize,
+                currentPortionSizeGrams = parsedServingSize
+            )
 
             if (productName.isBlank()) {
                 productName = ocrText
@@ -80,12 +104,25 @@ fun ScanScreen(
             }
         } else {
             nutrition = NutritionParser.NutritionData()
+            baseNutrition = NutritionParser.NutritionData()
+            detectedServingSizeGrams = null
+            portionSizeGramsText = ""
             productName = ""
             editCalories = ""
             editProtein = ""
             editCarbs = ""
             editFat = ""
         }
+    }
+
+    LaunchedEffect(portionSizeGramsText, detectedServingSizeGrams, baseNutrition) {
+        val currentPortionSize = portionSizeGramsText.toFloatOrNull()?.takeIf { it > 0f }
+
+        nutrition = recalculateNutrition(
+            baseNutrition = baseNutrition,
+            detectedServingSizeGrams = detectedServingSizeGrams,
+            currentPortionSizeGrams = currentPortionSize
+        )
     }
 
     val pickImageLauncher = rememberLauncherForActivityResult(
@@ -109,6 +146,7 @@ fun ScanScreen(
         }
     }
 
+    val currentPortionGrams = portionSizeGramsText.toFloatOrNull()?.takeIf { it > 0f }
     val canSave = ocrText.isNotBlank() && nutrition.calories != null
 
     Scaffold(
@@ -167,12 +205,19 @@ fun ScanScreen(
                 confirmButton = {
                     TextButton(
                         onClick = {
-                            nutrition = NutritionParser.NutritionData(
+                            baseNutrition = NutritionParser.NutritionData(
                                 calories = editCalories.toIntOrNull(),
                                 protein = editProtein.toIntOrNull(),
                                 carbs = editCarbs.toIntOrNull(),
                                 fat = editFat.toIntOrNull()
                             )
+
+                            nutrition = recalculateNutrition(
+                                baseNutrition = baseNutrition,
+                                detectedServingSizeGrams = detectedServingSizeGrams,
+                                currentPortionSizeGrams = portionSizeGramsText.toFloatOrNull()?.takeIf { it > 0f }
+                            )
+
                             showAdjustDialog = false
                         }
                     ) {
@@ -280,10 +325,45 @@ fun ScanScreen(
                         singleLine = true
                     )
 
+                    OutlinedTextField(
+                        value = portionSizeGramsText,
+                        onValueChange = { input ->
+                            val filtered = input.filter { it.isDigit() || it == '.' }
+                            val firstDotIndex = filtered.indexOf('.')
+
+                            portionSizeGramsText = if (firstDotIndex == -1) {
+                                filtered
+                            } else {
+                                val beforeDot = filtered.substring(0, firstDotIndex + 1)
+                                val afterDot = filtered.substring(firstDotIndex + 1).replace(".", "")
+                                beforeDot + afterDot
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Portion size (grams)") },
+                        placeholder = { Text("e.g. 30") },
+                        singleLine = true,
+                        supportingText = {
+                            when {
+                                detectedServingSizeGrams != null -> {
+                                    Text(
+                                        "Detected: ${detectedServingSizeGrams!!.toPrettyString()} g. " +
+                                                "Adjust to match what you ate — macros update automatically."
+                                    )
+                                }
+                                else -> {
+                                    Text(
+                                        "Adjust to match what you ate. Macros update automatically."
+                                    )
+                                }
+                            }
+                        }
+                    )
+
                     Spacer(Modifier.height(4.dp))
 
                     Text(
-                        "Macros per serving",
+                        "Macros for selected portion",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold
                     )
@@ -309,6 +389,14 @@ fun ScanScreen(
                         Nutriple(
                             "Fat",
                             nutrition.fat?.let { "$it g" } ?: "--"
+                        )
+                    }
+
+                    if (detectedServingSizeGrams != null) {
+                        Text(
+                            text = "Recalculated from ${detectedServingSizeGrams!!.toPrettyString()} g serving.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.Gray
                         )
                     }
 
@@ -341,7 +429,7 @@ fun ScanScreen(
                                     fat = (nutrition.fat ?: 0).toFloat(),
                                     mealType = "Meal",
                                     createdAt = System.currentTimeMillis(),
-                                    portionGrams = null,
+                                    portionGrams = currentPortionGrams,
                                     photoPath = selectedImage?.toString(),
                                     notes = ocrText.ifBlank { null }
                                 )
@@ -352,6 +440,9 @@ fun ScanScreen(
                                 ocrText = ""
                                 productName = ""
                                 nutrition = NutritionParser.NutritionData()
+                                baseNutrition = NutritionParser.NutritionData()
+                                detectedServingSizeGrams = null
+                                portionSizeGramsText = ""
                                 editCalories = ""
                                 editProtein = ""
                                 editCarbs = ""
@@ -371,5 +462,67 @@ fun ScanScreen(
                 }
             }
         }
+    }
+}
+
+private fun recalculateNutrition(
+    baseNutrition: NutritionParser.NutritionData,
+    detectedServingSizeGrams: Float?,
+    currentPortionSizeGrams: Float?
+): NutritionParser.NutritionData {
+    if (
+        detectedServingSizeGrams == null ||
+        currentPortionSizeGrams == null ||
+        detectedServingSizeGrams <= 0f ||
+        currentPortionSizeGrams <= 0f
+    ) {
+        return baseNutrition
+    }
+
+    val ratio = currentPortionSizeGrams / detectedServingSizeGrams
+
+    return NutritionParser.NutritionData(
+        calories = baseNutrition.calories?.let { (it * ratio).roundToInt() },
+        protein = baseNutrition.protein?.let { (it * ratio).roundToInt() },
+        carbs = baseNutrition.carbs?.let { (it * ratio).roundToInt() },
+        fat = baseNutrition.fat?.let { (it * ratio).roundToInt() }
+    )
+}
+
+private fun extractServingSizeGrams(text: String): Float? {
+    val servingLineRegex = Regex(
+        pattern = """(?im)^.*serving\s*size.*?(\d+(?:\.\d+)?)\s*g\b.*$""",
+        option = RegexOption.IGNORE_CASE
+    )
+
+    val genericLineRegex = Regex(
+        pattern = """(?im)^.*per\s+(\d+(?:\.\d+)?)\s*g\b.*$""",
+        option = RegexOption.IGNORE_CASE
+    )
+
+    val directRegex = Regex(
+        pattern = """(?i)\b(\d+(?:\.\d+)?)\s*g\b"""
+    )
+
+    val servingMatch = servingLineRegex.find(text)
+        ?.groupValues?.getOrNull(1)
+        ?.toFloatOrNull()
+    if (servingMatch != null) return servingMatch
+
+    val genericMatch = genericLineRegex.find(text)
+        ?.groupValues?.getOrNull(1)
+        ?.toFloatOrNull()
+    if (genericMatch != null) return genericMatch
+
+    return directRegex.find(text)
+        ?.groupValues?.getOrNull(1)
+        ?.toFloatOrNull()
+}
+
+private fun Float.toPrettyString(): String {
+    return if (this % 1f == 0f) {
+        this.toInt().toString()
+    } else {
+        this.toString()
     }
 }
