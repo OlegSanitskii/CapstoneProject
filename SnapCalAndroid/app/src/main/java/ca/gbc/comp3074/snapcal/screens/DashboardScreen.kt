@@ -10,10 +10,14 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import ca.gbc.comp3074.snapcal.health.HealthConnectManager
@@ -22,7 +26,9 @@ import ca.gbc.comp3074.snapcal.ui.components.CardBlock
 import ca.gbc.comp3074.snapcal.ui.state.AuthViewModel
 import ca.gbc.comp3074.snapcal.ui.state.MealsViewModel
 import kotlinx.coroutines.flow.flowOf
-import kotlinx.coroutines.launch
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.CameraAlt
+import androidx.compose.material3.Icon
 
 @Composable
 fun DashboardScreen(
@@ -32,13 +38,12 @@ fun DashboardScreen(
     onSignOut: () -> Unit,
 ) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
 
     // --- Auth / email ---
     val authVM: AuthViewModel = viewModel()
     val email by authVM.userEmail.collectAsState()
 
-    // --- Meals / today calories ---
+    // --- Meals / today calories in ---
     val mealsVM: MealsViewModel = viewModel()
 
     val totalTodayKcal by remember(mealsVM) {
@@ -50,40 +55,56 @@ fun DashboardScreen(
         }
     }.collectAsState(initial = 0)
 
-    val kcalGoal = 2200
-    val burned = 700          // пока демо-значение
-    val consumed = totalTodayKcal
-    val remaining = (kcalGoal - consumed).coerceAtLeast(0)
-    val balance = consumed - burned
-
-    val progress = if (kcalGoal > 0) {
-        consumed.coerceAtMost(kcalGoal).toFloat() / kcalGoal
-    } else 0f
-    val sweepAngle = 360f * progress
-
-    // --- Health Connect / steps (today + weekly) ---
+    // --- Health Connect / real activity data ---
     var hcAvailable by remember { mutableStateOf<Boolean?>(null) }
     var hcHasPermissions by remember { mutableStateOf(false) }
+
     var todaySteps by remember { mutableStateOf<Long?>(null) }
     var weeklySteps by remember { mutableStateOf<List<Long>?>(null) }
+
+    var todayBurned by remember { mutableStateOf<Int?>(null) }
+    var weeklyBurned by remember { mutableStateOf<List<Int>?>(null) }
+
     var hcError by remember { mutableStateOf<String?>(null) }
 
     val client = remember { HealthConnectManager.getClientOrNull(context) }
 
     LaunchedEffect(client) {
         hcAvailable = client != null
+
         if (client != null) {
             try {
                 hcHasPermissions = HealthConnectManager.hasAllPermissions(client)
+
                 if (hcHasPermissions) {
                     todaySteps = HealthConnectManager.readTodaySteps(client)
                     weeklySteps = HealthConnectManager.readWeeklySteps(client)
+
+                    todayBurned = HealthConnectManager.readTodayCalories(client)
+                    weeklyBurned = HealthConnectManager.readWeeklyCalories(client)
                 }
             } catch (e: Exception) {
                 hcError = e.localizedMessage ?: "Failed to read Health Connect data"
             }
         }
     }
+
+    // --- Calories summary ---
+    val kcalGoal = 2200
+    val consumed = totalTodayKcal
+    val burned = todayBurned ?: 0
+    val remaining = (kcalGoal - consumed).coerceAtLeast(0)
+    val balance = consumed - burned
+
+    val progress = if (kcalGoal > 0) {
+        consumed.coerceAtMost(kcalGoal).toFloat() / kcalGoal.toFloat()
+    } else {
+        0f
+    }
+
+    // --- Weekly summaries ---
+    val weeklyStepsTotal = weeklySteps?.sum() ?: 0L
+    val weeklyBurnedTotal = weeklyBurned?.sum() ?: 0
 
     LazyColumn(
         modifier = Modifier
@@ -99,63 +120,85 @@ fun DashboardScreen(
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                    horizontalArrangement = Arrangement.spacedBy(18.dp)
                 ) {
-                    Canvas(modifier = Modifier.size(96.dp)) {
-                        val stroke = 14.dp.toPx()
-                        drawArc(
-                            color = Color(0xFFE5E5E5),
-                            startAngle = 0f,
-                            sweepAngle = 360f,
-                            useCenter = false,
-                            style = Stroke(width = stroke)
-                        )
-                        drawArc(
-                            color = Color(0xFF4A90E2),
-                            startAngle = -90f,
-                            sweepAngle = sweepAngle,
-                            useCenter = false,
-                            style = Stroke(width = stroke)
-                        )
-                    }
-
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("In:  $consumed kcal")
-                        Text("Out: $burned kcal")
-
-                        val balanceLabel =
-                            (if (balance > 0) "+" else "") + "$balance kcal"
-                        Text(
-                            "Balance: $balanceLabel",
-                            fontWeight = FontWeight.Bold
-                        )
-
-                        Spacer(Modifier.height(8.dp))
-
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                Modifier
-                                    .size(12.dp)
-                                    .background(Color(0xFF4A90E2), RoundedCornerShape(2.dp))
+                    Box(
+                        modifier = Modifier.size(110.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Canvas(modifier = Modifier.fillMaxSize()) {
+                            val stroke = 14.dp.toPx()
+                            val diameter = size.minDimension
+                            val topLeft = Offset(
+                                (size.width - diameter) / 2f,
+                                (size.height - diameter) / 2f
                             )
-                            Spacer(Modifier.width(6.dp))
-                            Text(
-                                "Consumed (goal $kcalGoal)",
-                                color = Color.Gray
+
+                            drawArc(
+                                color = Color(0xFFE5E5E5),
+                                startAngle = 0f,
+                                sweepAngle = 360f,
+                                useCenter = false,
+                                topLeft = topLeft,
+                                size = androidx.compose.ui.geometry.Size(diameter, diameter),
+                                style = Stroke(width = stroke, cap = StrokeCap.Round)
+                            )
+
+                            drawArc(
+                                color = Color(0xFF4A90E2),
+                                startAngle = -90f,
+                                sweepAngle = 360f * progress,
+                                useCenter = false,
+                                topLeft = topLeft,
+                                size = androidx.compose.ui.geometry.Size(diameter, diameter),
+                                style = Stroke(width = stroke, cap = StrokeCap.Round)
                             )
                         }
 
-                        Spacer(Modifier.height(4.dp))
-
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                Modifier
-                                    .size(12.dp)
-                                    .background(Color(0xFFE5E5E5), RoundedCornerShape(2.dp))
-                            )
-                            Spacer(Modifier.width(6.dp))
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Text(
-                                "Remaining: $remaining kcal",
+                                text = formatNumber(consumed),
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "kcal in",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color.Gray
+                            )
+                        }
+                    }
+
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        SummaryLine(
+                            label = "Out",
+                            value = "${formatNumber(burned)} kcal"
+                        )
+
+                        SummaryLine(
+                            label = "Balance",
+                            value = (if (balance > 0) "+" else "") + "${formatNumber(balance)} kcal",
+                            bold = true
+                        )
+
+                        SummaryLine(
+                            label = "Goal",
+                            value = "${formatNumber(kcalGoal)} kcal"
+                        )
+
+                        SummaryLine(
+                            label = "Remaining",
+                            value = "${formatNumber(remaining)} kcal",
+                            valueColor = Color.Gray
+                        )
+
+                        if (hcHasPermissions) {
+                            Text(
+                                text = "Out is read live from Health Connect.",
+                                style = MaterialTheme.typography.bodySmall,
                                 color = Color.Gray
                             )
                         }
@@ -164,63 +207,46 @@ fun DashboardScreen(
             }
         }
 
-        // --- Steps today + weekly ---
+        // --- Steps + Activity ---
         item {
             Row(
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                CardBlock(modifier = Modifier.weight(1f), title = "Steps") {
+                CardBlock(
+                    modifier = Modifier.weight(1f),
+                    title = "Steps"
+                ) {
                     when {
                         hcAvailable == false -> {
-                            Text(
-                                "Health Connect not available on this device.",
-                                color = Color.Gray,
-                                style = MaterialTheme.typography.bodySmall
-                            )
+                            SmallMutedText("Health Connect not available.")
                         }
+
                         hcHasPermissions && todaySteps != null -> {
-                            Text(
-                                "${todaySteps}",
-                                style = MaterialTheme.typography.titleLarge,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text(
-                                "Steps today (from Health Connect)",
-                                color = Color.Gray,
-                                style = MaterialTheme.typography.bodySmall
-                            )
+                            MetricValue(formatNumber(todaySteps ?: 0L))
+                            MetricLabel("Today")
+
+                            Spacer(Modifier.height(12.dp))
+
+                            SecondaryMetricValue(formatNumber(weeklyStepsTotal))
+                            MetricLabel("This week")
                         }
+
                         hcHasPermissions && todaySteps == null -> {
-                            Text(
-                                "Loading steps...",
-                                color = Color.Gray,
-                                style = MaterialTheme.typography.bodySmall
-                            )
+                            SmallMutedText("Loading steps...")
                         }
+
                         hcAvailable == true && !hcHasPermissions -> {
-                            Text(
-                                "Connect Health Connect in Settings to see real steps.",
-                                color = Color.Gray,
-                                style = MaterialTheme.typography.bodySmall
-                            )
-                            Text(
-                                "Sample: 6,842",
-                                color = Color.Gray,
-                                style = MaterialTheme.typography.labelSmall
-                            )
+                            SmallMutedText("Connect Health Connect in Settings.")
                         }
+
                         else -> {
-                            Text(
-                                "Steps data not available.",
-                                color = Color.Gray,
-                                style = MaterialTheme.typography.bodySmall
-                            )
+                            SmallMutedText("Steps data not available.")
                         }
                     }
 
                     if (hcError != null) {
-                        Spacer(Modifier.height(4.dp))
+                        Spacer(Modifier.height(6.dp))
                         Text(
                             text = hcError!!,
                             color = MaterialTheme.colorScheme.error,
@@ -229,88 +255,132 @@ fun DashboardScreen(
                     }
                 }
 
-                CardBlock(modifier = Modifier.weight(1f), title = "Workouts") {
-                    Text("Cycling 45 min", fontWeight = FontWeight.SemiBold)
-                    Text("Burned: 520 kcal", color = Color.Gray)
+                CardBlock(
+                    modifier = Modifier.weight(1f),
+                    title = "Activity"
+                ) {
+                    when {
+                        hcAvailable == false -> {
+                            SmallMutedText("Health Connect not available.")
+                        }
+
+                        hcHasPermissions -> {
+                            MetricValue("${formatNumber(burned)} kcal")
+                            MetricLabel("Burned today")
+
+                            Spacer(Modifier.height(12.dp))
+
+                            SecondaryMetricValue("${formatNumber(weeklyBurnedTotal)} kcal")
+                            MetricLabel("Last 7 days")
+                        }
+
+                        hcAvailable == true && !hcHasPermissions -> {
+                            SmallMutedText("Connect Health Connect in Settings.")
+                        }
+
+                        else -> {
+                            SmallMutedText("Activity data not available.")
+                        }
+                    }
                 }
             }
         }
 
         // --- Weekly steps chart ---
         item {
-            CardBlock(title = "Steps (weekly)") {
+            CardBlock(title = "Steps") {
                 if (hcHasPermissions && weeklySteps != null) {
                     val labels = HealthConnectManager.weekDayLabels()
                     val values = weeklySteps!!
                     val maxVal = (values.maxOrNull() ?: 0L).coerceAtLeast(1L)
 
-                    Column {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                         Text(
-                            "Current week",
+                            text = "Current week",
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.SemiBold
                         )
-                        Spacer(Modifier.height(8.dp))
 
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(120.dp),
-                            verticalAlignment = Alignment.Bottom,
-                            horizontalArrangement = Arrangement.SpaceBetween
+                                .height(160.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.Bottom
                         ) {
-                            values.forEachIndexed { index, v ->
+                            values.forEachIndexed { index, value ->
                                 val fraction =
-                                    (v.toFloat() / maxVal.toFloat()).coerceIn(0f, 1f)
+                                    (value.toFloat() / maxVal.toFloat()).coerceIn(0f, 1f)
 
                                 Column(
+                                    modifier = Modifier.width(34.dp),
                                     horizontalAlignment = Alignment.CenterHorizontally,
                                     verticalArrangement = Arrangement.Bottom
                                 ) {
+                                    Text(
+                                        text = if (value > 0) compactNumber(value) else "",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = Color.Gray,
+                                        textAlign = TextAlign.Center,
+                                        maxLines = 1
+                                    )
+
+                                    Spacer(Modifier.height(6.dp))
+
                                     Box(
                                         modifier = Modifier
-                                            .width(14.dp)
-                                            .fillMaxHeight(fraction)
-                                            .background(
-                                                color = MaterialTheme.colorScheme.primary,
-                                                shape = MaterialTheme.shapes.small
+                                            .height(92.dp)
+                                            .width(18.dp),
+                                        contentAlignment = Alignment.BottomCenter
+                                    ) {
+                                        if (value > 0) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .fillMaxHeight(fraction.coerceAtLeast(0.08f))
+                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .background(MaterialTheme.colorScheme.primary)
                                             )
-                                    )
-                                    Spacer(Modifier.height(4.dp))
+                                        }
+                                    }
+
+                                    Spacer(Modifier.height(6.dp))
+
                                     Text(
-                                        labels[index],
+                                        text = labels[index],
                                         color = Color.Gray,
-                                        style = MaterialTheme.typography.labelSmall
+                                        style = MaterialTheme.typography.labelSmall,
+                                        textAlign = TextAlign.Center
                                     )
                                 }
                             }
                         }
                     }
                 } else {
-                    Text(
-                        "Connect Health Connect to see weekly steps.",
-                        color = Color.Gray,
-                        style = MaterialTheme.typography.bodySmall
-                    )
+                    SmallMutedText("Connect Health Connect to see weekly steps.")
                 }
             }
         }
 
-        // --- Quick actions ---
+        // --- Scan Label ---
         item {
-            CardBlock(title = "Quick Actions") {
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Button(onScan, modifier = Modifier.weight(1f)) {
-                        Text("Scan Label")
-                    }
-                    OutlinedButton(onManual, modifier = Modifier.weight(1f)) {
-                        Text("Log Meal")
-                    }
-                    OutlinedButton(onProgress, modifier = Modifier.weight(1f)) {
-                        Text("Progress")
+            CardBlock(title = "") {
+
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+
+                    Button(
+                        onClick = onScan,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(56.dp),
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.CameraAlt,
+                            contentDescription = null
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text("Scan Nutrition Facts Label")
                     }
                 }
             }
@@ -320,23 +390,106 @@ fun DashboardScreen(
         item {
             CardBlock(title = "Account") {
                 if (email.isNotBlank()) {
-                    Text("Signed in as: $email", color = Color.Gray)
+                    Text(
+                        text = email,
+                        color = Color.Gray,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
                     Spacer(Modifier.height(12.dp))
                 }
+
                 Button(
                     onClick = {
                         authVM.signOut { onSignOut() }
                     },
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = MaterialTheme.colorScheme.error,
                         contentColor = MaterialTheme.colorScheme.onError
-                    ),
-                    contentPadding = PaddingValues(14.dp)
+                    )
                 ) {
                     Text("Sign out")
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun SummaryLine(
+    label: String,
+    value: String,
+    bold: Boolean = false,
+    valueColor: Color = Color.Unspecified
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(
+            text = label,
+            color = Color.Gray,
+            style = MaterialTheme.typography.bodyMedium
+        )
+        Text(
+            text = value,
+            fontWeight = if (bold) FontWeight.Bold else FontWeight.Medium,
+            color = if (valueColor == Color.Unspecified) {
+                MaterialTheme.colorScheme.onSurface
+            } else {
+                valueColor
+            },
+            style = MaterialTheme.typography.bodyMedium
+        )
+    }
+}
+
+@Composable
+private fun MetricValue(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.headlineSmall,
+        fontWeight = FontWeight.Bold
+    )
+}
+
+@Composable
+private fun SecondaryMetricValue(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.titleMedium,
+        fontWeight = FontWeight.SemiBold
+    )
+}
+
+@Composable
+private fun MetricLabel(text: String) {
+    Text(
+        text = text,
+        color = Color.Gray,
+        style = MaterialTheme.typography.bodySmall
+    )
+}
+
+@Composable
+private fun SmallMutedText(text: String) {
+    Text(
+        text = text,
+        color = Color.Gray,
+        style = MaterialTheme.typography.bodySmall
+    )
+}
+
+private fun formatNumber(value: Int): String = "%,d".format(value)
+
+private fun formatNumber(value: Long): String = "%,d".format(value)
+
+private fun compactNumber(value: Long): String {
+    return when {
+        value >= 1_000_000 -> String.format("%.1fM", value / 1_000_000f)
+        value >= 1_000 -> String.format("%.1fk", value / 1_000f)
+        else -> value.toString()
     }
 }
