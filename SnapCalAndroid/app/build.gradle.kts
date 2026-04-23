@@ -48,11 +48,14 @@ dependencies {
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
 
+    // --- WorkManager ---
+    implementation("androidx.work:work-runtime-ktx:2.9.1")
+
     // --- ML Kit: OCR (on-device text recognition) ---
-    implementation("com.google.android.gms:play-services-mlkit-text-recognition:18.0.2") // OCR :contentReference[oaicite:1]{index=1}
+    implementation("com.google.android.gms:play-services-mlkit-text-recognition:18.0.2")
 
     // --- Health Connect client ---
-    implementation("androidx.health.connect:connect-client:1.1.0")  // Health Connect SDK :contentReference[oaicite:2]{index=2}
+    implementation("androidx.health.connect:connect-client:1.1.0")
 
     // Preview images from URI in Compose
     implementation("io.coil-kt:coil-compose:2.7.0")

@@ -12,8 +12,6 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface MealDao {
 
-    // ---- CRUD ----
-
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(meal: Meal): Long
 
@@ -28,7 +26,6 @@ interface MealDao {
 
     @Query("DELETE FROM meals WHERE id = :id")
     suspend fun deleteById(id: Long)
-
 
     @Query("SELECT * FROM meals ORDER BY createdAt DESC")
     fun observeAll(): Flow<List<Meal>>
@@ -45,11 +42,17 @@ interface MealDao {
 
     @Query("""
         SELECT * FROM meals
+        WHERE createdAt BETWEEN :fromMillis AND :toMillis
+        ORDER BY createdAt ASC
+    """)
+    suspend fun getInRange(fromMillis: Long, toMillis: Long): List<Meal>
+
+    @Query("""
+        SELECT * FROM meals
         WHERE date(createdAt/1000, 'unixepoch') = date(:dayStartMillis/1000, 'unixepoch')
         ORDER BY createdAt DESC
     """)
     fun observeByDay(dayStartMillis: Long): Flow<List<Meal>>
-
 
     @Query("""
         SELECT IFNULL(SUM(calories), 0) FROM meals
