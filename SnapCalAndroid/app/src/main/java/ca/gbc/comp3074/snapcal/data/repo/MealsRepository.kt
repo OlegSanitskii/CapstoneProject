@@ -7,30 +7,36 @@ import kotlinx.coroutines.flow.Flow
 class MealsRepository(private val mealDao: MealDao) {
 
     suspend fun save(meal: Meal): Long = mealDao.upsert(meal)
+
     suspend fun saveAll(meals: List<Meal>) = mealDao.upsertAll(meals)
+
     suspend fun delete(meal: Meal) = mealDao.delete(meal)
-    suspend fun deleteById(id: Long) = mealDao.deleteById(id)
-    suspend fun getById(id: Long) = mealDao.getById(id)
 
-    fun observeAll(): Flow<List<Meal>> = mealDao.observeAll()
-    fun observeInRange(fromMillis: Long, toMillis: Long) =
-        mealDao.observeInRange(fromMillis, toMillis)
+    suspend fun deleteById(id: Long, userId: Int) = mealDao.deleteById(id, userId)
 
-    suspend fun getInRange(fromMillis: Long, toMillis: Long): List<Meal> =
-        mealDao.getInRange(fromMillis, toMillis)
+    suspend fun getById(id: Long, userId: Int) = mealDao.getById(id, userId)
 
-    fun observeByDay(dayStartMillis: Long) =
-        mealDao.observeByDay(dayStartMillis)
+    fun observeAll(userId: Int): Flow<List<Meal>> =
+        mealDao.observeAll(userId)
 
-    fun observeTotalCalories(fromMillis: Long, toMillis: Long) =
-        mealDao.observeTotalCalories(fromMillis, toMillis)
+    fun observeInRange(userId: Int, fromMillis: Long, toMillis: Long): Flow<List<Meal>> =
+        mealDao.observeInRange(userId, fromMillis, toMillis)
 
-    fun observeTotalProtein(fromMillis: Long, toMillis: Long) =
-        mealDao.observeTotalProtein(fromMillis, toMillis)
+    suspend fun getInRange(userId: Int, fromMillis: Long, toMillis: Long): List<Meal> =
+        mealDao.getInRange(userId, fromMillis, toMillis)
 
-    fun observeTotalCarbs(fromMillis: Long, toMillis: Long) =
-        mealDao.observeTotalCarbs(fromMillis, toMillis)
+    fun observeByDay(userId: Int, dayStartMillis: Long): Flow<List<Meal>> =
+        mealDao.observeByDay(userId, dayStartMillis)
 
-    fun observeTotalFat(fromMillis: Long, toMillis: Long) =
-        mealDao.observeTotalFat(fromMillis, toMillis)
+    fun observeTotalCalories(userId: Int, fromMillis: Long, toMillis: Long): Flow<Int> =
+        mealDao.observeTotalCalories(userId, fromMillis, toMillis)
+
+    fun observeTotalProtein(userId: Int, fromMillis: Long, toMillis: Long): Flow<Float> =
+        mealDao.observeTotalProtein(userId, fromMillis, toMillis)
+
+    fun observeTotalCarbs(userId: Int, fromMillis: Long, toMillis: Long): Flow<Float> =
+        mealDao.observeTotalCarbs(userId, fromMillis, toMillis)
+
+    fun observeTotalFat(userId: Int, fromMillis: Long, toMillis: Long): Flow<Float> =
+        mealDao.observeTotalFat(userId, fromMillis, toMillis)
 }

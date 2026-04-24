@@ -6,7 +6,13 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.CameraAlt
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -20,15 +26,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import ca.gbc.comp3074.snapcal.data.user.User
+import ca.gbc.comp3074.snapcal.data.user.UserRepository
 import ca.gbc.comp3074.snapcal.health.HealthConnectManager
 import ca.gbc.comp3074.snapcal.ui.components.AppTopBar
 import ca.gbc.comp3074.snapcal.ui.components.CardBlock
 import ca.gbc.comp3074.snapcal.ui.state.AuthViewModel
 import ca.gbc.comp3074.snapcal.ui.state.MealsViewModel
 import kotlinx.coroutines.flow.flowOf
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.CameraAlt
-import androidx.compose.material3.Icon
 
 @Composable
 fun DashboardScreen(
@@ -39,11 +44,21 @@ fun DashboardScreen(
 ) {
     val context = LocalContext.current
 
-    // --- Auth / email ---
     val authVM: AuthViewModel = viewModel()
     val email by authVM.userEmail.collectAsState()
+    val userId by authVM.userId.collectAsState()
 
-    // --- Meals / today calories in ---
+    val userRepository = remember { UserRepository.get(context) }
+    var currentUser by remember { mutableStateOf<User?>(null) }
+
+    LaunchedEffect(userId) {
+        currentUser = userId?.let { id ->
+            userRepository.getById(id)
+        }
+    }
+
+    val healthEnabledForThisAccount = currentUser?.healthConnectEnabled == true
+
     val mealsVM: MealsViewModel = viewModel()
 
     val totalTodayKcal by remember(mealsVM) {
@@ -55,7 +70,6 @@ fun DashboardScreen(
         }
     }.collectAsState(initial = 0)
 
-    // --- Health Connect / real activity data ---
     var hcAvailable by remember { mutableStateOf<Boolean?>(null) }
     var hcHasPermissions by remember { mutableStateOf(false) }
 
@@ -69,8 +83,19 @@ fun DashboardScreen(
 
     val client = remember { HealthConnectManager.getClientOrNull(context) }
 
-    LaunchedEffect(client) {
+    LaunchedEffect(client, healthEnabledForThisAccount) {
         hcAvailable = client != null
+        hcHasPermissions = false
+
+        todaySteps = null
+        weeklySteps = null
+        todayBurned = null
+        weeklyBurned = null
+        hcError = null
+
+        if (!healthEnabledForThisAccount) {
+            return@LaunchedEffect
+        }
 
         if (client != null) {
             try {
@@ -89,10 +114,9 @@ fun DashboardScreen(
         }
     }
 
-    // --- Calories summary ---
     val kcalGoal = 2200
     val consumed = totalTodayKcal
-    val burned = todayBurned ?: 0
+    val burned = if (healthEnabledForThisAccount) todayBurned ?: 0 else 0
     val remaining = (kcalGoal - consumed).coerceAtLeast(0)
     val balance = consumed - burned
 
@@ -102,9 +126,8 @@ fun DashboardScreen(
         0f
     }
 
-    // --- Weekly summaries ---
-    val weeklyStepsTotal = weeklySteps?.sum() ?: 0L
-    val weeklyBurnedTotal = weeklyBurned?.sum() ?: 0
+    val weeklyStepsTotal = if (healthEnabledForThisAccount) weeklySteps?.sum() ?: 0L else 0L
+    val weeklyBurnedTotal = if (healthEnabledForThisAccount) weeklyBurned?.sum() ?: 0 else 0
 
     LazyColumn(
         modifier = Modifier
@@ -114,7 +137,6 @@ fun DashboardScreen(
     ) {
         item { AppTopBar("Dashboard") }
 
-        // --- Calories card ---
         item {
             CardBlock(title = "Calories (in vs out)") {
                 Row(
@@ -195,19 +217,20 @@ fun DashboardScreen(
                             valueColor = Color.Gray
                         )
 
-                        if (hcHasPermissions) {
-                            Text(
-                                text = "Out is read live from Health Connect.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = Color.Gray
-                            )
-                        }
+                        Text(
+                            text = if (healthEnabledForThisAccount) {
+                                "Out is read live from Health Connect."
+                            } else {
+                                "Health data is disabled for this account."
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.Gray
+                        )
                     }
                 }
             }
         }
 
-        // --- Steps + Activity ---
         item {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -218,6 +241,10 @@ fun DashboardScreen(
                     title = "Steps"
                 ) {
                     when {
+                        !healthEnabledForThisAccount -> {
+                            SmallMutedText("Health data is disabled for this account.")
+                        }
+
                         hcAvailable == false -> {
                             SmallMutedText("Health Connect not available.")
                         }
@@ -260,6 +287,10 @@ fun DashboardScreen(
                     title = "Activity"
                 ) {
                     when {
+                        !healthEnabledForThisAccount -> {
+                            SmallMutedText("Health data is disabled for this account.")
+                        }
+
                         hcAvailable == false -> {
                             SmallMutedText("Health Connect not available.")
                         }
@@ -286,10 +317,9 @@ fun DashboardScreen(
             }
         }
 
-        // --- Weekly steps chart ---
         item {
             CardBlock(title = "Steps") {
-                if (hcHasPermissions && weeklySteps != null) {
+                if (healthEnabledForThisAccount && hcHasPermissions && weeklySteps != null) {
                     val labels = HealthConnectManager.weekDayLabels()
                     val values = weeklySteps!!
                     val maxVal = (values.maxOrNull() ?: 0L).coerceAtLeast(1L)
@@ -357,17 +387,20 @@ fun DashboardScreen(
                         }
                     }
                 } else {
-                    SmallMutedText("Connect Health Connect to see weekly steps.")
+                    SmallMutedText(
+                        if (healthEnabledForThisAccount) {
+                            "Connect Health Connect to see weekly steps."
+                        } else {
+                            "Health data is disabled for this account."
+                        }
+                    )
                 }
             }
         }
 
-        // --- Scan Label ---
         item {
             CardBlock(title = "") {
-
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-
                     Button(
                         onClick = onScan,
                         modifier = Modifier
@@ -386,12 +419,18 @@ fun DashboardScreen(
             }
         }
 
-        // --- Account ---
         item {
             CardBlock(title = "Account") {
                 if (email.isNotBlank()) {
                     Text(
                         text = email,
+                        color = Color.Gray,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                    Spacer(Modifier.height(12.dp))
+                } else {
+                    Text(
+                        text = "Guest account",
                         color = Color.Gray,
                         style = MaterialTheme.typography.bodyMedium
                     )

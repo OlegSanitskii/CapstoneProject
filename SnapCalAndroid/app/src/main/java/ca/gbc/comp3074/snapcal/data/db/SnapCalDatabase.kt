@@ -8,7 +8,7 @@ import ca.gbc.comp3074.snapcal.data.user.UserDao
 
 @Database(
     entities = [Meal::class, User::class],
-    version = 5,
+    version = 7,
     exportSchema = true
 )
 abstract class SnapCalDatabase : RoomDatabase() {

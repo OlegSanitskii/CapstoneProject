@@ -24,57 +24,64 @@ interface MealDao {
     @Delete
     suspend fun delete(meal: Meal)
 
-    @Query("DELETE FROM meals WHERE id = :id")
-    suspend fun deleteById(id: Long)
+    @Query("DELETE FROM meals WHERE id = :id AND userId = :userId")
+    suspend fun deleteById(id: Long, userId: Int)
 
-    @Query("SELECT * FROM meals ORDER BY createdAt DESC")
-    fun observeAll(): Flow<List<Meal>>
+    @Query("SELECT * FROM meals WHERE userId = :userId ORDER BY createdAt DESC")
+    fun observeAll(userId: Int): Flow<List<Meal>>
 
-    @Query("SELECT * FROM meals WHERE id = :id LIMIT 1")
-    suspend fun getById(id: Long): Meal?
+    @Query("SELECT * FROM meals WHERE id = :id AND userId = :userId LIMIT 1")
+    suspend fun getById(id: Long, userId: Int): Meal?
 
     @Query("""
         SELECT * FROM meals
-        WHERE createdAt BETWEEN :fromMillis AND :toMillis
+        WHERE userId = :userId
+        AND createdAt BETWEEN :fromMillis AND :toMillis
         ORDER BY createdAt DESC
     """)
-    fun observeInRange(fromMillis: Long, toMillis: Long): Flow<List<Meal>>
+    fun observeInRange(userId: Int, fromMillis: Long, toMillis: Long): Flow<List<Meal>>
 
     @Query("""
         SELECT * FROM meals
-        WHERE createdAt BETWEEN :fromMillis AND :toMillis
+        WHERE userId = :userId
+        AND createdAt BETWEEN :fromMillis AND :toMillis
         ORDER BY createdAt ASC
     """)
-    suspend fun getInRange(fromMillis: Long, toMillis: Long): List<Meal>
+    suspend fun getInRange(userId: Int, fromMillis: Long, toMillis: Long): List<Meal>
 
     @Query("""
         SELECT * FROM meals
-        WHERE date(createdAt/1000, 'unixepoch') = date(:dayStartMillis/1000, 'unixepoch')
+        WHERE userId = :userId
+        AND date(createdAt/1000, 'unixepoch') = date(:dayStartMillis/1000, 'unixepoch')
         ORDER BY createdAt DESC
     """)
-    fun observeByDay(dayStartMillis: Long): Flow<List<Meal>>
+    fun observeByDay(userId: Int, dayStartMillis: Long): Flow<List<Meal>>
 
     @Query("""
         SELECT IFNULL(SUM(calories), 0) FROM meals
-        WHERE createdAt BETWEEN :fromMillis AND :toMillis
+        WHERE userId = :userId
+        AND createdAt BETWEEN :fromMillis AND :toMillis
     """)
-    fun observeTotalCalories(fromMillis: Long, toMillis: Long): Flow<Int>
+    fun observeTotalCalories(userId: Int, fromMillis: Long, toMillis: Long): Flow<Int>
 
     @Query("""
         SELECT IFNULL(SUM(protein), 0) FROM meals
-        WHERE createdAt BETWEEN :fromMillis AND :toMillis
+        WHERE userId = :userId
+        AND createdAt BETWEEN :fromMillis AND :toMillis
     """)
-    fun observeTotalProtein(fromMillis: Long, toMillis: Long): Flow<Float>
+    fun observeTotalProtein(userId: Int, fromMillis: Long, toMillis: Long): Flow<Float>
 
     @Query("""
         SELECT IFNULL(SUM(carbs), 0) FROM meals
-        WHERE createdAt BETWEEN :fromMillis AND :toMillis
+        WHERE userId = :userId
+        AND createdAt BETWEEN :fromMillis AND :toMillis
     """)
-    fun observeTotalCarbs(fromMillis: Long, toMillis: Long): Flow<Float>
+    fun observeTotalCarbs(userId: Int, fromMillis: Long, toMillis: Long): Flow<Float>
 
     @Query("""
         SELECT IFNULL(SUM(fat), 0) FROM meals
-        WHERE createdAt BETWEEN :fromMillis AND :toMillis
+        WHERE userId = :userId
+        AND createdAt BETWEEN :fromMillis AND :toMillis
     """)
-    fun observeTotalFat(fromMillis: Long, toMillis: Long): Flow<Float>
+    fun observeTotalFat(userId: Int, fromMillis: Long, toMillis: Long): Flow<Float>
 }

@@ -2,13 +2,16 @@ package ca.gbc.comp3074.snapcal.reports
 
 import android.content.Context
 import android.net.Uri
+import androidx.health.connect.client.HealthConnectClient
+import ca.gbc.comp3074.snapcal.data.auth.SessionStore
 import ca.gbc.comp3074.snapcal.data.db.DBProvider
 import ca.gbc.comp3074.snapcal.data.repo.MealsRepository
+import ca.gbc.comp3074.snapcal.data.user.UserRepository
 import ca.gbc.comp3074.snapcal.health.HealthConnectManager
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import java.time.Instant
-import java.time.LocalDate
 import java.time.YearMonth
 import java.time.ZoneId
 
@@ -16,6 +19,8 @@ class MonthlyReportService(
     context: Context
 ) {
     private val appContext = context.applicationContext
+    private val session = SessionStore(appContext)
+    private val userRepository = UserRepository.get(appContext)
     private val mealsRepository = MealsRepository(DBProvider.get(appContext).mealDao())
     private val csvWriter = CsvReportWriter()
     private val pdfWriter = PdfReportWriter()
@@ -31,28 +36,60 @@ class MonthlyReportService(
         folderUri: Uri
     ): ReportGenerationResult = withContext(Dispatchers.IO) {
         try {
-            val client = HealthConnectManager.getClientOrNull(appContext)
+            val currentUserId = session.userId.first()
                 ?: return@withContext ReportGenerationResult(
                     success = false,
-                    message = "Health Connect is not available on this device."
+                    message = "Please sign in to generate account reports."
                 )
 
-            if (!HealthConnectManager.hasAllPermissions(client)) {
+            val currentUser = userRepository.getById(currentUserId)
+                ?: return@withContext ReportGenerationResult(
+                    success = false,
+                    message = "Current user was not found."
+                )
+
+            if (!currentUser.reportsEnabled) {
                 return@withContext ReportGenerationResult(
                     success = false,
-                    message = "Health Connect read permissions are not granted."
+                    message = "Reports are disabled for this account."
                 )
             }
 
-            val needsHistory = month != YearMonth.now()
-            if (needsHistory && !HealthConnectManager.hasHistoryPermission(client)) {
-                return@withContext ReportGenerationResult(
-                    success = false,
-                    message = "History access is required to export a past month."
-                )
+            val client = if (currentUser.healthConnectEnabled) {
+                HealthConnectManager.getClientOrNull(appContext)
+                    ?: return@withContext ReportGenerationResult(
+                        success = false,
+                        message = "Health Connect is enabled for this account, but it is not available on this device."
+                    )
+            } else {
+                null
             }
 
-            val report = buildMonthlyReport(month, client)
+            if (currentUser.healthConnectEnabled && client != null) {
+                if (!HealthConnectManager.hasAllPermissions(client)) {
+                    return@withContext ReportGenerationResult(
+                        success = false,
+                        message = "Health Connect read permissions are not granted."
+                    )
+                }
+
+                val needsHistory = month != YearMonth.now()
+
+                if (needsHistory && !HealthConnectManager.hasHistoryPermission(client)) {
+                    return@withContext ReportGenerationResult(
+                        success = false,
+                        message = "History access is required to export a past month."
+                    )
+                }
+            }
+
+            val report = buildMonthlyReport(
+                month = month,
+                userId = currentUserId,
+                healthConnectEnabled = currentUser.healthConnectEnabled,
+                client = client
+            )
+
             val csvUri = csvWriter.write(appContext, folderUri, report)
             val pdfUri = pdfWriter.write(appContext, folderUri, report)
 
@@ -73,28 +110,53 @@ class MonthlyReportService(
 
     private suspend fun buildMonthlyReport(
         month: YearMonth,
-        client: androidx.health.connect.client.HealthConnectClient
+        userId: Int,
+        healthConnectEnabled: Boolean,
+        client: HealthConnectClient?
     ): MonthlyReportData {
         val zoneId = ZoneId.systemDefault()
-        val monthStart = month.atDay(1).atStartOfDay(zoneId).toInstant().toEpochMilli()
-        val monthEndExclusive = month.plusMonths(1).atDay(1).atStartOfDay(zoneId).toInstant().toEpochMilli()
 
-        val meals = mealsRepository.getInRange(monthStart, monthEndExclusive)
-        val consumedByDate = meals.groupBy { meal ->
-            Instant.ofEpochMilli(meal.createdAt).atZone(zoneId).toLocalDate()
-        }.mapValues { (_, dayMeals) ->
-            dayMeals.sumOf { it.calories }
+        val monthStart = month
+            .atDay(1)
+            .atStartOfDay(zoneId)
+            .toInstant()
+            .toEpochMilli()
+
+        val monthEndExclusive = month
+            .plusMonths(1)
+            .atDay(1)
+            .atStartOfDay(zoneId)
+            .toInstant()
+            .toEpochMilli()
+
+        val meals = mealsRepository.getInRange(
+            userId = userId,
+            fromMillis = monthStart,
+            toMillis = monthEndExclusive
+        )
+
+        val consumedByDate = meals
+            .groupBy { meal ->
+                Instant.ofEpochMilli(meal.createdAt)
+                    .atZone(zoneId)
+                    .toLocalDate()
+            }
+            .mapValues { (_, dayMeals) ->
+                dayMeals.sumOf { meal -> meal.calories }
+            }
+
+        val burnedByDay = if (healthConnectEnabled && client != null) {
+            HealthConnectManager.readDailyCaloriesForMonth(client, month)
+        } else {
+            List(month.lengthOfMonth()) { 0 }
         }
 
-        val burnedByDay = HealthConnectManager.readDailyCaloriesForMonth(client, month)
-
         val entries = mutableListOf<DailyReportEntry>()
-        var currentDate = month.atDay(1)
 
-        for (i in 0 until month.lengthOfMonth()) {
-            val date = currentDate.plusDays(i.toLong())
+        for (day in 1..month.lengthOfMonth()) {
+            val date = month.atDay(day)
             val consumed = consumedByDate[date] ?: 0
-            val burned = burnedByDay.getOrElse(i) { 0 }
+            val burned = burnedByDay.getOrElse(day - 1) { 0 }
 
             entries += DailyReportEntry(
                 date = date,
@@ -103,8 +165,8 @@ class MonthlyReportService(
             )
         }
 
-        val totalConsumed = entries.sumOf { it.consumedKcal }
-        val totalBurned = entries.sumOf { it.burnedKcal }
+        val totalConsumed = entries.sumOf { entry -> entry.consumedKcal }
+        val totalBurned = entries.sumOf { entry -> entry.burnedKcal }
         val days = entries.size.coerceAtLeast(1)
 
         val summary = MonthlyReportSummary(
