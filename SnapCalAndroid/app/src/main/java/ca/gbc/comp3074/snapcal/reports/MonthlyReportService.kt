@@ -12,6 +12,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import java.time.Instant
+import java.time.LocalDate
 import java.time.YearMonth
 import java.time.ZoneId
 
@@ -25,14 +26,45 @@ class MonthlyReportService(
     private val csvWriter = CsvReportWriter()
     private val pdfWriter = PdfReportWriter()
 
-    suspend fun generateCurrentMonthReport(folderUri: Uri): ReportGenerationResult =
-        generateMonthReport(month = YearMonth.now(), folderUri = folderUri)
+    suspend fun generateCurrentMonthReport(folderUri: Uri): ReportGenerationResult {
+        val today = LocalDate.now()
+        val month = YearMonth.from(today)
 
-    suspend fun generatePreviousMonthReport(folderUri: Uri): ReportGenerationResult =
-        generateMonthReport(month = YearMonth.now().minusMonths(1), folderUri = folderUri)
+        return generateReportForPeriod(
+            month = month,
+            startDate = month.atDay(1),
+            endDate = today,
+            folderUri = folderUri
+        )
+    }
+
+    suspend fun generatePreviousMonthReport(folderUri: Uri): ReportGenerationResult {
+        val previousMonth = YearMonth.now().minusMonths(1)
+
+        return generateReportForPeriod(
+            month = previousMonth,
+            startDate = previousMonth.atDay(1),
+            endDate = previousMonth.atEndOfMonth(),
+            folderUri = folderUri
+        )
+    }
 
     suspend fun generateMonthReport(
         month: YearMonth,
+        folderUri: Uri
+    ): ReportGenerationResult {
+        return generateReportForPeriod(
+            month = month,
+            startDate = month.atDay(1),
+            endDate = month.atEndOfMonth(),
+            folderUri = folderUri
+        )
+    }
+
+    private suspend fun generateReportForPeriod(
+        month: YearMonth,
+        startDate: LocalDate,
+        endDate: LocalDate,
         folderUri: Uri
     ): ReportGenerationResult = withContext(Dispatchers.IO) {
         try {
@@ -73,18 +105,21 @@ class MonthlyReportService(
                     )
                 }
 
-                val needsHistory = month != YearMonth.now()
+                val today = LocalDate.now()
+                val needsHistory = startDate.isBefore(today.minusDays(30))
 
                 if (needsHistory && !HealthConnectManager.hasHistoryPermission(client)) {
                     return@withContext ReportGenerationResult(
                         success = false,
-                        message = "History access is required to export a past month."
+                        message = "History access is required to export this report period."
                     )
                 }
             }
 
             val report = buildMonthlyReport(
                 month = month,
+                startDate = startDate,
+                endDate = endDate,
                 userId = currentUserId,
                 healthConnectEnabled = currentUser.healthConnectEnabled,
                 client = client
@@ -110,29 +145,30 @@ class MonthlyReportService(
 
     private suspend fun buildMonthlyReport(
         month: YearMonth,
+        startDate: LocalDate,
+        endDate: LocalDate,
         userId: Int,
         healthConnectEnabled: Boolean,
         client: HealthConnectClient?
     ): MonthlyReportData {
         val zoneId = ZoneId.systemDefault()
 
-        val monthStart = month
-            .atDay(1)
+        val startMillis = startDate
             .atStartOfDay(zoneId)
             .toInstant()
             .toEpochMilli()
 
-        val monthEndExclusive = month
-            .plusMonths(1)
-            .atDay(1)
+        val endExclusive = endDate.plusDays(1)
+
+        val endMillisExclusive = endExclusive
             .atStartOfDay(zoneId)
             .toInstant()
             .toEpochMilli()
 
         val meals = mealsRepository.getInRange(
             userId = userId,
-            fromMillis = monthStart,
-            toMillis = monthEndExclusive
+            fromMillis = startMillis,
+            toMillis = endMillisExclusive
         )
 
         val consumedByDate = meals
@@ -146,23 +182,32 @@ class MonthlyReportService(
             }
 
         val burnedByDay = if (healthConnectEnabled && client != null) {
-            HealthConnectManager.readDailyCaloriesForMonth(client, month)
+            HealthConnectManager.readDailyCaloriesForRange(
+                client = client,
+                startInclusive = startDate,
+                endExclusive = endExclusive,
+                zoneId = zoneId
+            )
         } else {
-            List(month.lengthOfMonth()) { 0 }
+            emptyList()
         }
 
         val entries = mutableListOf<DailyReportEntry>()
+        var currentDate = startDate
+        var index = 0
 
-        for (day in 1..month.lengthOfMonth()) {
-            val date = month.atDay(day)
-            val consumed = consumedByDate[date] ?: 0
-            val burned = burnedByDay.getOrElse(day - 1) { 0 }
+        while (!currentDate.isAfter(endDate)) {
+            val consumed = consumedByDate[currentDate] ?: 0
+            val burned = burnedByDay.getOrElse(index) { 0 }
 
             entries += DailyReportEntry(
-                date = date,
+                date = currentDate,
                 consumedKcal = consumed,
                 burnedKcal = burned
             )
+
+            currentDate = currentDate.plusDays(1)
+            index += 1
         }
 
         val totalConsumed = entries.sumOf { entry -> entry.consumedKcal }
@@ -179,6 +224,8 @@ class MonthlyReportService(
 
         return MonthlyReportData(
             month = month,
+            startDate = startDate,
+            endDate = endDate,
             entries = entries,
             summary = summary
         )

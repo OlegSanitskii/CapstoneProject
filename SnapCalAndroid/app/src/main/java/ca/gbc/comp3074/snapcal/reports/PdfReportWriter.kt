@@ -17,7 +17,7 @@ class PdfReportWriter {
         val directory = DocumentFile.fromTreeUri(context, folderUri)
             ?: error("Selected reports folder is invalid.")
 
-        val fileName = "snapcal-report-${report.month}.pdf"
+        val fileName = "snapcal-report-${report.fileSuffix}.pdf"
 
         directory.findFile(fileName)?.delete()
 
@@ -71,6 +71,7 @@ class PdfReportWriter {
 
         drawLine("SnapCal Monthly Report", titlePaint, 28f)
         drawLine("Month: ${report.month}", bodyPaint)
+        drawLine("Period: ${report.periodLabel}", bodyPaint)
         drawLine("", bodyPaint, 8f)
 
         drawLine("Summary", sectionPaint, 22f)

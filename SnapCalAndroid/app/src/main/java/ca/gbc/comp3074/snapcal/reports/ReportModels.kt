@@ -23,9 +23,21 @@ data class MonthlyReportSummary(
 
 data class MonthlyReportData(
     val month: YearMonth,
+    val startDate: LocalDate,
+    val endDate: LocalDate,
     val entries: List<DailyReportEntry>,
     val summary: MonthlyReportSummary
-)
+) {
+    val periodLabel: String
+        get() = "$startDate to $endDate"
+
+    val fileSuffix: String
+        get() = if (startDate == month.atDay(1) && endDate == month.atEndOfMonth()) {
+            month.toString()
+        } else {
+            "${month}-through-$endDate"
+        }
+}
 
 data class ReportGenerationResult(
     val success: Boolean,

@@ -14,7 +14,7 @@ class CsvReportWriter {
         val directory = DocumentFile.fromTreeUri(context, folderUri)
             ?: error("Selected reports folder is invalid.")
 
-        val fileName = "snapcal-report-${report.month}.csv"
+        val fileName = "snapcal-report-${report.fileSuffix}.csv"
 
         directory.findFile(fileName)?.delete()
 
@@ -24,6 +24,7 @@ class CsvReportWriter {
         context.contentResolver.openOutputStream(file.uri)?.bufferedWriter()?.use { writer ->
             writer.appendLine("SnapCal Monthly Report")
             writer.appendLine("Month,${report.month}")
+            writer.appendLine("Period,${report.periodLabel}")
             writer.appendLine("Total consumed kcal,${report.summary.totalConsumedKcal}")
             writer.appendLine("Total burned kcal,${report.summary.totalBurnedKcal}")
             writer.appendLine("Total balance kcal,${report.summary.totalBalanceKcal}")
