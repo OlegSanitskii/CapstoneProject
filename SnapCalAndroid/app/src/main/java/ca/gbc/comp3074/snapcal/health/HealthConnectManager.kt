@@ -7,6 +7,7 @@ import androidx.health.connect.client.HealthConnectClient.Companion.SDK_UNAVAILA
 import androidx.health.connect.client.HealthConnectClient.Companion.SDK_UNAVAILABLE_PROVIDER_UPDATE_REQUIRED
 import androidx.health.connect.client.HealthConnectFeatures
 import androidx.health.connect.client.permission.HealthPermission
+import androidx.health.connect.client.records.ActiveCaloriesBurnedRecord
 import androidx.health.connect.client.records.StepsRecord
 import androidx.health.connect.client.records.TotalCaloriesBurnedRecord
 import androidx.health.connect.client.request.AggregateRequest
@@ -27,6 +28,7 @@ object HealthConnectManager {
     val PERMISSIONS: Set<String> = setOf(
         HealthPermission.getReadPermission(StepsRecord::class),
         HealthPermission.getReadPermission(TotalCaloriesBurnedRecord::class),
+        HealthPermission.getReadPermission(ActiveCaloriesBurnedRecord::class),
     )
 
     fun getClientOrNull(context: Context): HealthConnectClient? {
@@ -102,7 +104,7 @@ object HealthConnectManager {
 
         val response = client.aggregate(
             AggregateRequest(
-                metrics = setOf(TotalCaloriesBurnedRecord.ENERGY_TOTAL),
+                metrics = setOf(ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL),
                 timeRangeFilter = TimeRangeFilter.between(
                     startOfDay.toInstant(),
                     now.toInstant()
@@ -111,7 +113,7 @@ object HealthConnectManager {
         )
 
         val energy: Energy =
-            response[TotalCaloriesBurnedRecord.ENERGY_TOTAL]
+            response[ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL]
                 ?: Energy.kilocalories(0.0)
 
         return energy.inKilocalories.roundToInt()
@@ -155,7 +157,7 @@ object HealthConnectManager {
 
             val response = client.aggregate(
                 AggregateRequest(
-                    metrics = setOf(TotalCaloriesBurnedRecord.ENERGY_TOTAL),
+                    metrics = setOf(ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL),
                     timeRangeFilter = TimeRangeFilter.between(
                         dayStart.toInstant(),
                         dayEnd.toInstant()
@@ -164,7 +166,7 @@ object HealthConnectManager {
             )
 
             val energy: Energy =
-                response[TotalCaloriesBurnedRecord.ENERGY_TOTAL]
+                response[ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL]
                     ?: Energy.kilocalories(0.0)
 
             result.add(energy.inKilocalories.roundToInt())
@@ -176,7 +178,7 @@ object HealthConnectManager {
     suspend fun readDailyCaloriesForMonth(
         client: HealthConnectClient,
         month: YearMonth
-    ): List<Int> {
+    ): Map<LocalDate, Int> {
         val zoneId = ZoneId.systemDefault()
         val start = month.atDay(1)
         val endExclusive = month.plusMonths(1).atDay(1)
@@ -189,8 +191,8 @@ object HealthConnectManager {
         startInclusive: LocalDate,
         endExclusive: LocalDate,
         zoneId: ZoneId = ZoneId.systemDefault()
-    ): List<Int> {
-        val result = mutableListOf<Int>()
+    ): Map<LocalDate, Int> {
+        val result = mutableMapOf<LocalDate, Int>()
         var current = startInclusive
 
         while (current.isBefore(endExclusive)) {
@@ -199,7 +201,7 @@ object HealthConnectManager {
 
             val response = client.aggregate(
                 AggregateRequest(
-                    metrics = setOf(TotalCaloriesBurnedRecord.ENERGY_TOTAL),
+                    metrics = setOf(ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL),
                     timeRangeFilter = TimeRangeFilter.between(
                         dayStart.toInstant(),
                         dayEnd.toInstant()
@@ -207,10 +209,12 @@ object HealthConnectManager {
                 )
             )
 
-            val energy = response[TotalCaloriesBurnedRecord.ENERGY_TOTAL]
-                ?: Energy.kilocalories(0.0)
+            val activeEnergy = response[ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL]
 
-            result += energy.inKilocalories.roundToInt()
+            if (activeEnergy != null && activeEnergy.inKilocalories > 0.0) {
+                result[current] = activeEnergy.inKilocalories.roundToInt()
+            }
+
             current = current.plusDays(1)
         }
 

@@ -181,7 +181,7 @@ class MonthlyReportService(
                 dayMeals.sumOf { meal -> meal.calories }
             }
 
-        val burnedByDay = if (healthConnectEnabled && client != null) {
+        val burnedByDate = if (healthConnectEnabled && client != null) {
             HealthConnectManager.readDailyCaloriesForRange(
                 client = client,
                 startInclusive = startDate,
@@ -189,16 +189,15 @@ class MonthlyReportService(
                 zoneId = zoneId
             )
         } else {
-            emptyList()
+            emptyMap()
         }
 
         val entries = mutableListOf<DailyReportEntry>()
         var currentDate = startDate
-        var index = 0
 
         while (!currentDate.isAfter(endDate)) {
             val consumed = consumedByDate[currentDate] ?: 0
-            val burned = burnedByDay.getOrElse(index) { 0 }
+            val burned = burnedByDate[currentDate] ?: 0
 
             entries += DailyReportEntry(
                 date = currentDate,
@@ -207,7 +206,6 @@ class MonthlyReportService(
             )
 
             currentDate = currentDate.plusDays(1)
-            index += 1
         }
 
         val totalConsumed = entries.sumOf { entry -> entry.consumedKcal }

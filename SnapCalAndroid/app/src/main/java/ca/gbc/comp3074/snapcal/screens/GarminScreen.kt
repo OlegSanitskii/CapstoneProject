@@ -13,8 +13,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -24,6 +22,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.PermissionController
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavHostController
 import ca.gbc.comp3074.snapcal.data.settings.ReportSettings
 import ca.gbc.comp3074.snapcal.data.settings.ReportSettingsStore
@@ -35,7 +34,6 @@ import ca.gbc.comp3074.snapcal.reports.ReportScheduler
 import ca.gbc.comp3074.snapcal.ui.components.AppTopBar
 import ca.gbc.comp3074.snapcal.ui.components.CardBlock
 import ca.gbc.comp3074.snapcal.ui.state.AuthViewModel
-import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -83,6 +81,7 @@ fun GarminScreen(
 
     suspend fun refreshStatus(hcClient: HealthConnectClient) {
         error = null
+
         try {
             hcHasPermissions = HealthConnectManager.hasAllPermissions(hcClient)
             backgroundReadAvailable = HealthConnectManager.isBackgroundReadFeatureAvailable(hcClient)
@@ -98,13 +97,46 @@ fun GarminScreen(
         contract = PermissionController.createRequestPermissionResultContract()
     ) { granted: Set<String> ->
         hcHasPermissions = granted.containsAll(HealthConnectManager.PERMISSIONS)
+
         backgroundReadGranted =
             granted.contains(HealthConnectManager.BACKGROUND_READ_PERMISSION) || backgroundReadGranted
+
         historyReadGranted =
             granted.contains(HealthConnectManager.HISTORY_READ_PERMISSION) || historyReadGranted
 
         if (client != null) {
-            scope.launch { refreshStatus(client) }
+            scope.launch {
+                refreshStatus(client)
+            }
+        }
+    }
+
+    suspend fun requestMissingBasePermissions(hcClient: HealthConnectClient) {
+        val granted = HealthConnectManager.getGrantedPermissions(hcClient)
+        val missingPermissions = HealthConnectManager.PERMISSIONS - granted
+
+        if (missingPermissions.isEmpty()) {
+            reportMessage = "Base Health Connect permissions are already granted."
+            refreshStatus(hcClient)
+        } else {
+            healthPermissionsLauncher.launch(missingPermissions)
+        }
+    }
+
+    suspend fun requestMissingAutomationPermissions(hcClient: HealthConnectClient) {
+        val granted = HealthConnectManager.getGrantedPermissions(hcClient)
+
+        val availableAutomationPermissions =
+            HealthConnectManager.automationPermissionsToRequest(hcClient)
+
+        val missingAutomationPermissions =
+            availableAutomationPermissions - granted
+
+        if (missingAutomationPermissions.isEmpty()) {
+            reportMessage = "Automation permissions are already granted or not available on this device."
+            refreshStatus(hcClient)
+        } else {
+            healthPermissionsLauncher.launch(missingAutomationPermissions)
         }
     }
 
@@ -120,6 +152,7 @@ fun GarminScreen(
             scope.launch {
                 settingsStore.setReportsFolderUri(uri.toString())
                 reportMessage = "Reports folder saved."
+
                 if (currentUser?.reportsEnabled == true) {
                     ReportScheduler.scheduleNextMonthlyReport(context)
                 }
@@ -131,6 +164,7 @@ fun GarminScreen(
 
     LaunchedEffect(client) {
         hcAvailable = client != null
+
         if (client != null) {
             refreshStatus(client)
         }
@@ -143,6 +177,7 @@ fun GarminScreen(
 
     fun formatDate(millis: Long?): String {
         if (millis == null) return "Not generated yet"
+
         val formatter = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault())
         return formatter.format(Date(millis))
     }
@@ -157,7 +192,9 @@ fun GarminScreen(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        item { AppTopBar("Health & Activity", nav) }
+        item {
+            AppTopBar("Health & Activity", nav)
+        }
 
         item {
             CardBlock(title = "Account health settings") {
@@ -189,8 +226,9 @@ fun GarminScreen(
                                     "Enable Health Connect for this account",
                                     style = MaterialTheme.typography.titleSmall
                                 )
+
                                 Text(
-                                    "Dashboard and burned calories will use Health Connect only for this SnapCal account.",
+                                    "Allows this SnapCal account to use Health Connect data for dashboard activity and burned calories in reports.",
                                     color = Color.Gray,
                                     style = MaterialTheme.typography.bodySmall
                                 )
@@ -203,6 +241,7 @@ fun GarminScreen(
                                 onCheckedChange = { enabled ->
                                     scope.launch {
                                         userRepository.setHealthConnectEnabled(signedInUser.id, enabled)
+
                                         currentUser = signedInUser.copy(
                                             healthConnectEnabled = enabled
                                         )
@@ -211,15 +250,7 @@ fun GarminScreen(
                                             if (client == null) {
                                                 reportMessage = "Health Connect is not available on this device."
                                             } else {
-                                                val hasPermissions =
-                                                    HealthConnectManager.hasAllPermissions(client)
-
-                                                if (!hasPermissions) {
-                                                    healthPermissionsLauncher.launch(
-                                                        HealthConnectManager.PERMISSIONS
-                                                    )
-                                                }
-
+                                                requestMissingBasePermissions(client)
                                                 refreshStatus(client)
                                             }
                                         } else {
@@ -242,8 +273,9 @@ fun GarminScreen(
                                     "Enable monthly reports for this account",
                                     style = MaterialTheme.typography.titleSmall
                                 )
+
                                 Text(
-                                    "Manual and automatic reports will be allowed only for this SnapCal account.",
+                                    "Allows manual and automatic reports only for this SnapCal account.",
                                     color = Color.Gray,
                                     style = MaterialTheme.typography.bodySmall
                                 )
@@ -256,6 +288,7 @@ fun GarminScreen(
                                 onCheckedChange = { enabled ->
                                     scope.launch {
                                         userRepository.setReportsEnabled(signedInUser.id, enabled)
+
                                         currentUser = signedInUser.copy(
                                             reportsEnabled = enabled
                                         )
@@ -268,12 +301,7 @@ fun GarminScreen(
                                             }
 
                                             if (healthEnabledForAccount && client != null) {
-                                                val extraPermissions =
-                                                    HealthConnectManager.automationPermissionsToRequest(client)
-
-                                                if (extraPermissions.isNotEmpty()) {
-                                                    healthPermissionsLauncher.launch(extraPermissions)
-                                                }
+                                                requestMissingAutomationPermissions(client)
                                             }
 
                                             ReportScheduler.scheduleNextMonthlyReport(context)
@@ -294,15 +322,20 @@ fun GarminScreen(
         item {
             CardBlock(title = "Health Connect status") {
                 when (hcAvailable) {
-                    null -> Text("Checking Health Connect...", color = Color.Gray)
+                    null -> {
+                        Text("Checking Health Connect...", color = Color.Gray)
+                    }
 
-                    false -> Text(
-                        "Health Connect is not available on this device.",
-                        color = MaterialTheme.colorScheme.error
-                    )
+                    false -> {
+                        Text(
+                            "Health Connect is not available on this device.",
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
 
                     true -> {
                         Text("Health Connect is available ✅")
+
                         Spacer(Modifier.height(4.dp))
 
                         Text(
@@ -318,7 +351,20 @@ fun GarminScreen(
                             }
                         )
 
-                        Spacer(Modifier.height(8.dp))
+                        Spacer(Modifier.height(12.dp))
+
+                        Text(
+                            "Base Health Connect permissions",
+                            style = MaterialTheme.typography.titleSmall
+                        )
+
+                        Text(
+                            "Required to read steps and active calories. Used for dashboard activity data and burned calories in monthly reports.",
+                            color = Color.Gray,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+
+                        Spacer(Modifier.height(6.dp))
 
                         if (hcHasPermissions) {
                             Text("Base permissions granted ✅")
@@ -327,19 +373,41 @@ fun GarminScreen(
                                 "Base permissions not granted.",
                                 color = MaterialTheme.colorScheme.error
                             )
+
                             Spacer(Modifier.height(8.dp))
 
                             Button(
                                 onClick = {
-                                    healthPermissionsLauncher.launch(HealthConnectManager.PERMISSIONS)
+                                    client?.let { hcClient ->
+                                        scope.launch {
+                                            requestMissingBasePermissions(hcClient)
+                                        }
+                                    } ?: run {
+                                        reportMessage = "Health Connect client is not available."
+                                    }
                                 },
                                 enabled = signedInUser != null && healthEnabledForAccount
                             ) {
-                                Text("Grant permissions")
+                                Text("Grant base permissions")
                             }
                         }
 
-                        Spacer(Modifier.height(8.dp))
+                        Spacer(Modifier.height(12.dp))
+
+                        if (backgroundReadAvailable || historyReadAvailable) {
+                            Text(
+                                "Automation permissions",
+                                style = MaterialTheme.typography.titleSmall
+                            )
+
+                            Text(
+                                "Used for automatic monthly reports. Background access lets SnapCal read Health Connect data when the app is not open. History access lets SnapCal export older report periods.",
+                                color = Color.Gray,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+
+                            Spacer(Modifier.height(6.dp))
+                        }
 
                         if (backgroundReadAvailable) {
                             Text(
@@ -379,14 +447,8 @@ fun GarminScreen(
                             OutlinedButton(
                                 onClick = {
                                     client?.let { hcClient ->
-                                        val extraPermissions =
-                                            HealthConnectManager.automationPermissionsToRequest(hcClient)
-
-                                        if (extraPermissions.isNotEmpty()) {
-                                            healthPermissionsLauncher.launch(extraPermissions)
-                                        } else {
-                                            reportMessage =
-                                                "No additional Health Connect permissions are available on this device."
+                                        scope.launch {
+                                            requestMissingAutomationPermissions(hcClient)
                                         }
                                     } ?: run {
                                         reportMessage = "Health Connect client is not available."
@@ -402,6 +464,7 @@ fun GarminScreen(
 
                 if (error != null) {
                     Spacer(Modifier.height(6.dp))
+
                     Text(
                         text = error!!,
                         color = MaterialTheme.colorScheme.error,
@@ -417,7 +480,7 @@ fun GarminScreen(
             CardBlock(title = "Monthly reports") {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text(
-                        "Reports are controlled per SnapCal account. Consumed calories come from this account's meals. Burned calories are included only if Health Connect is enabled for this account.",
+                        "Reports are controlled per SnapCal account. Consumed calories come from this account's meals. Burned calories are included only if Health Connect is enabled and permissions are granted for this account.",
                         style = MaterialTheme.typography.bodyMedium
                     )
 
@@ -449,7 +512,9 @@ fun GarminScreen(
                     )
 
                     OutlinedButton(
-                        onClick = { folderPickerLauncher.launch(null) },
+                        onClick = {
+                            folderPickerLauncher.launch(null)
+                        },
                         modifier = Modifier.fillMaxWidth(),
                         enabled = signedInUser != null
                     ) {
@@ -494,7 +559,11 @@ fun GarminScreen(
                         enabled = manualReportEnabled
                     ) {
                         Text(
-                            if (isGenerating) "Generating report..." else "Get report now"
+                            if (isGenerating) {
+                                "Generating report..."
+                            } else {
+                                "Get report now"
+                            }
                         )
                     }
 
@@ -510,6 +579,7 @@ fun GarminScreen(
                         "Last generated month: ${reportSettings.lastGeneratedMonth ?: "None"}",
                         style = MaterialTheme.typography.bodySmall
                     )
+
                     Text(
                         "Last generated at: ${formatDate(reportSettings.lastGeneratedAtMillis)}",
                         style = MaterialTheme.typography.bodySmall,
@@ -518,6 +588,7 @@ fun GarminScreen(
 
                     if (reportMessage != null) {
                         Spacer(Modifier.height(4.dp))
+
                         Text(
                             reportMessage!!,
                             style = MaterialTheme.typography.bodySmall,
