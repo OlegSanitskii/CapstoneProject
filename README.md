@@ -32,7 +32,7 @@ Both versions follow the same product idea: help users track meals, nutrition la
 | Platform | Technology               | Location                                                                                                             |
 | -------- | ------------------------ | -------------------------------------------------------------------------------------------------------------------- |
 | Android  | Kotlin + Jetpack Compose | `/SnapCalAndroid`                                                                                                    |
-| iOS      | Swift + SwiftUI          | [iOS branch repository](https://github.com/OlegSanitskii/COMP3097Mobile-Application-Development2/tree/OlegSanitskii) |
+| iOS      | Swift + SwiftUI          | `/SnapCal_iOS`|
 
 ---
 
@@ -107,11 +107,7 @@ SnapCal/
 └── README.md            # Root project overview
 ```
 
-The iOS implementation is stored under OlegSanitskii branch (not in Main):
 
-```text
-https://github.com/OlegSanitskii/
-```
 
 ---
 
