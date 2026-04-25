@@ -81,6 +81,24 @@ object HealthConnectManager {
         return extra
     }
 
+    private fun totalCaloriesOrZero(
+        totalEnergy: Energy?,
+        activeEnergy: Energy?,
+        steps: Long?
+    ): Int {
+        val totalKcal = totalEnergy?.inKilocalories ?: 0.0
+        val activeKcal = activeEnergy?.inKilocalories ?: 0.0
+        val stepCount = steps ?: 0L
+
+        val hasRealDayData = stepCount > 0L || activeKcal > 0.0
+
+        return if (hasRealDayData && totalKcal > 0.0) {
+            totalKcal.roundToInt()
+        } else {
+            0
+        }
+    }
+
     suspend fun readTodaySteps(client: HealthConnectClient): Long {
         val now = ZonedDateTime.now()
         val startOfDay = now.truncatedTo(ChronoUnit.DAYS)
@@ -104,7 +122,11 @@ object HealthConnectManager {
 
         val response = client.aggregate(
             AggregateRequest(
-                metrics = setOf(ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL),
+                metrics = setOf(
+                    StepsRecord.COUNT_TOTAL,
+                    ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL,
+                    TotalCaloriesBurnedRecord.ENERGY_TOTAL
+                ),
                 timeRangeFilter = TimeRangeFilter.between(
                     startOfDay.toInstant(),
                     now.toInstant()
@@ -112,11 +134,11 @@ object HealthConnectManager {
             )
         )
 
-        val energy: Energy =
-            response[ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL]
-                ?: Energy.kilocalories(0.0)
-
-        return energy.inKilocalories.roundToInt()
+        return totalCaloriesOrZero(
+            totalEnergy = response[TotalCaloriesBurnedRecord.ENERGY_TOTAL],
+            activeEnergy = response[ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL],
+            steps = response[StepsRecord.COUNT_TOTAL]
+        )
     }
 
     suspend fun readWeeklySteps(client: HealthConnectClient): List<Long> {
@@ -157,7 +179,11 @@ object HealthConnectManager {
 
             val response = client.aggregate(
                 AggregateRequest(
-                    metrics = setOf(ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL),
+                    metrics = setOf(
+                        StepsRecord.COUNT_TOTAL,
+                        ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL,
+                        TotalCaloriesBurnedRecord.ENERGY_TOTAL
+                    ),
                     timeRangeFilter = TimeRangeFilter.between(
                         dayStart.toInstant(),
                         dayEnd.toInstant()
@@ -165,11 +191,13 @@ object HealthConnectManager {
                 )
             )
 
-            val energy: Energy =
-                response[ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL]
-                    ?: Energy.kilocalories(0.0)
-
-            result.add(energy.inKilocalories.roundToInt())
+            result.add(
+                totalCaloriesOrZero(
+                    totalEnergy = response[TotalCaloriesBurnedRecord.ENERGY_TOTAL],
+                    activeEnergy = response[ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL],
+                    steps = response[StepsRecord.COUNT_TOTAL]
+                )
+            )
         }
 
         return result
@@ -201,7 +229,11 @@ object HealthConnectManager {
 
             val response = client.aggregate(
                 AggregateRequest(
-                    metrics = setOf(ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL),
+                    metrics = setOf(
+                        StepsRecord.COUNT_TOTAL,
+                        ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL,
+                        TotalCaloriesBurnedRecord.ENERGY_TOTAL
+                    ),
                     timeRangeFilter = TimeRangeFilter.between(
                         dayStart.toInstant(),
                         dayEnd.toInstant()
@@ -209,10 +241,14 @@ object HealthConnectManager {
                 )
             )
 
-            val activeEnergy = response[ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL]
+            val kcal = totalCaloriesOrZero(
+                totalEnergy = response[TotalCaloriesBurnedRecord.ENERGY_TOTAL],
+                activeEnergy = response[ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL],
+                steps = response[StepsRecord.COUNT_TOTAL]
+            )
 
-            if (activeEnergy != null && activeEnergy.inKilocalories > 0.0) {
-                result[current] = activeEnergy.inKilocalories.roundToInt()
+            if (kcal > 0) {
+                result[current] = kcal
             }
 
             current = current.plusDays(1)
